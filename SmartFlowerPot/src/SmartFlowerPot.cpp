@@ -19,45 +19,32 @@
 #include "credentials.h"
 
 
-#define OLED_RESET D4
+#define OLED_RESET D4 //OLED 
 #define XPOS 0;
 #define YPOS 1;
 String DateTime, TimeOnly;
-
-float tempC;
-float pressPa;
-float humidRH;
-float tempF;
-float inHg;
-bool status;
-
-int plantPin=A1;
-float moisture;
-
-unsigned int last, lastTime;
-unsigned int moist, moistTime;
-unsigned int longT, longTime; 
-float subValue,pubValue;
-int moistNumber;
+// constants and variables for everything
+const int PUMPPIN=D19;
 int dustPin=D8;
 int duration;
 int startTime;
 int sampleTime_ms=30000;
 int lowPulseOccupancy=0;
+int plantPin=A1;
+int currentQuality=-1;
+unsigned int last, lastTime;
+float tempC;
+float pressPa;
+float humidRH;
+float tempF;
+float inHg;
+float moisture;
+float subValue,pubValue;
 float ratio=0;
 float concentration=0; 
-int currentQuality=-1;
-const int PUMPPIN=D19;
-void myAutoWater(int moisture, int PUMPPIN);
+bool status;
 
-
-void MQTT_connect();
-bool MQTT_ping();
-
-SYSTEM_MODE(AUTOMATIC);
-
-SYSTEM_THREAD(ENABLED);
-
+// classes
 AirQualitySensor sensor(A0);
 TCPClient TheClient; 
 Adafruit_MQTT_SPARK mqtt(&TheClient,AIO_SERVER,AIO_SERVERPORT,AIO_USERNAME,AIO_KEY);
@@ -70,13 +57,22 @@ Adafruit_MQTT_Publish dustFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/fee
 Adafruit_MQTT_Subscribe buttonFeed = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/buttononoff"); 
 Adafruit_SSD1306 display(OLED_RESET);//OLED display
 Adafruit_BME280 bme;
+//functions
+void myAutoWater(int moisture, int PUMPPIN);
+
+void MQTT_connect();
+bool MQTT_ping();
+
+SYSTEM_MODE(AUTOMATIC);
+
+SYSTEM_THREAD(ENABLED);
 
 // setup() runs once, when the device is first turned on
 void setup() {//start serial monitor
 Serial.begin(9600);
 waitFor(Serial.isConnected, 15000);
 
-WiFi.on();
+WiFi.on();//start the wifi
 WiFi.connect();
 while(WiFi.connecting()) {
 Serial.printf(".");
@@ -87,13 +83,14 @@ status = bme.begin(0x76);//start BME sensor
   if(status==false){
         Serial.printf("BME at address 0x%02X failed to start", 0x76);
   }
-pinMode(plantPin, INPUT);
+pinMode(plantPin, INPUT);//all the pins
 pinMode(dustPin, INPUT);
 pinMode(PUMPPIN, OUTPUT);
 digitalWrite (PUMPPIN, LOW);
 startTime=millis();
-Time.zone(-7);
+
 Particle.syncTime();//time
+Time.zone(-7);
 
 display.begin(SSD1306_SWITCHCAPVCC, 0x3D);//start oled
 
@@ -111,7 +108,7 @@ void loop() {
  MQTT_connect();
  MQTT_ping();
 
-  tempC=bme.readTemperature();//BME
+  tempC=bme.readTemperature();//BME, date and time, moisture, sensor etc
   pressPa=bme.readPressure();
   humidRH=bme.readHumidity();
   DateTime=Time.timeStr();
@@ -141,8 +138,8 @@ if((millis()-lastTime > 60000)) {
       Serial.printf("Moisture %0.2f \n",moisture);
       tempFeed.publish(tempF);
       Serial.printf("Temp %0.2f \n",tempF); 
-      psFeed.publish(pressPa);
-      Serial.printf("BP %0.2f \n",pressPa);
+      psFeed.publish(inHg);
+      Serial.printf("BP %0.2f \n",inHg);
       rhFeed.publish(humidRH);
       Serial.printf("Humidity %0.1 \n",humidRH);
       aqFeed.publish(currentQuality);
@@ -162,23 +159,22 @@ display.printf("TF %0.1f\n BP %0.1f\n HM %0.1f\n MS %0.1f\n AQ %i\n DP %0.1f\n",
 display.printf("Time %s\n",DateTime.c_str());
 display.display();
 
-myAutoWater(moisture, PUMPPIN);
+myAutoWater(moisture, PUMPPIN);//water function call
 
-Adafruit_MQTT_Subscribe *subscription;
+Adafruit_MQTT_Subscribe *subscription;//adafruit subscription
 while ((subscription = mqtt.readSubscription(10000))) {
    if (subscription == &buttonFeed) {
       subValue = atof((char *)buttonFeed.lastread);
       Serial.printf("Button Subscription %f \n", subValue);
   }
-  if(subValue==1){
+  if(subValue==1){//adafruit water plant button
       digitalWrite(PUMPPIN,HIGH);
-      delay(200);
+      delay(500);
       digitalWrite(PUMPPIN,LOW);
   }
   else{
       digitalWrite(PUMPPIN,LOW);
   }
-
 }
 }
 
@@ -218,14 +214,14 @@ bool MQTT_ping() {
   }
   return pingStatus;
 }
-void myAutoWater(int moisture, int PUMPPIN){
- if ((millis()-longTime) >6000){
+void myAutoWater(int moisture, int PUMPPIN){// water the plant if it is dry, check every half hour function
+static unsigned int longTime;
+
+ if ((millis()-longTime) >180000){
   if (moisture>2000){
     digitalWrite(PUMPPIN, HIGH);
     delay(500);
-    // if((millis()-moistTime)>500){
     digitalWrite(PUMPPIN, LOW);
-      // moistTime = millis();
     } 
     longTime = millis();
   }
