@@ -35,6 +35,8 @@ int plantPin=A1;
 float moisture;
 
 unsigned int last, lastTime;
+unsigned int moist, moistTime;
+unsigned int longT, longTime; 
 float subValue,pubValue;
 int moistNumber;
 int dustPin=D8;
@@ -46,6 +48,7 @@ float ratio=0;
 float concentration=0; 
 int currentQuality=-1;
 const int PUMPPIN=D19;
+void myAutoWater(int moisture, int PUMPPIN);
 
 
 void MQTT_connect();
@@ -53,7 +56,7 @@ bool MQTT_ping();
 
 SYSTEM_MODE(AUTOMATIC);
 
-//SYSTEM_THREAD(ENABLED);
+SYSTEM_THREAD(ENABLED);
 
 AirQualitySensor sensor(A0);
 TCPClient TheClient; 
@@ -64,6 +67,7 @@ Adafruit_MQTT_Publish psFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds
 Adafruit_MQTT_Publish rhFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/humidity");
 Adafruit_MQTT_Publish aqFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/air-quality");
 Adafruit_MQTT_Publish dustFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/dust-particulates");
+Adafruit_MQTT_Subscribe buttonFeed = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/buttononoff"); 
 Adafruit_SSD1306 display(OLED_RESET);//OLED display
 Adafruit_BME280 bme;
 
@@ -86,6 +90,7 @@ status = bme.begin(0x76);//start BME sensor
 pinMode(plantPin, INPUT);
 pinMode(dustPin, INPUT);
 pinMode(PUMPPIN, OUTPUT);
+digitalWrite (PUMPPIN, LOW);
 startTime=millis();
 Time.zone(-7);
 Particle.syncTime();//time
@@ -98,6 +103,7 @@ if (sensor.init()) {
 else {
   Serial.printf("Sensor ERROR!");
 }
+mqtt.subscribe(&buttonFeed);
 }
 
 // loop() runs over and over again, as quickly as it can execute.
@@ -115,8 +121,6 @@ void loop() {
 
   tempF=map(tempC,0.0,100.0,32.0,212.0);//BME maps
   inHg=map(pressPa,3386.0,108364.0,1.0,32.0); 
-
-
 
 lowPulseOccupancy=lowPulseOccupancy+duration;
 
@@ -140,9 +144,9 @@ if((millis()-lastTime > 60000)) {
       psFeed.publish(pressPa);
       Serial.printf("BP %0.2f \n",pressPa);
       rhFeed.publish(humidRH);
-      Serial.printf("Humidity %0.2f \n",humidRH);
+      Serial.printf("Humidity %0.1 \n",humidRH);
       aqFeed.publish(currentQuality);
-      Serial.printf("AQ %0.2f \n",currentQuality);
+      Serial.printf("AQ %i \n",currentQuality);
       dustFeed.publish(concentration);
       Serial.printf("DP %0.2f \n",concentration);
       }
@@ -153,20 +157,30 @@ display.setTextSize(1);
 display.setTextColor(WHITE);
 display.setCursor(0,0);
 display.clearDisplay();
-display.printf("TF %0.1f\n BP %0.1f\n HM %0.1f\n MS %0.1f\n AQ %0.1f\n DP %0.1f\n", tempF, inHg, humidRH, moisture, currentQuality, concentration);
+display.printf("TF %0.1f\n BP %0.1f\n HM %0.1f\n MS %0.1f\n AQ %i\n DP %0.1f\n", tempF, inHg, humidRH, moisture, currentQuality, concentration);
 // display.setTextSize(1);
 display.printf("Time %s\n",DateTime.c_str());
 display.display();
 
-if (moisture>2200){
- digitalWrite(PUMPPIN, HIGH);
+myAutoWater(moisture, PUMPPIN);
+
+Adafruit_MQTT_Subscribe *subscription;
+while ((subscription = mqtt.readSubscription(10000))) {
+   if (subscription == &buttonFeed) {
+      subValue = atof((char *)buttonFeed.lastread);
+      Serial.printf("Button Subscription %f \n", subValue);
+  }
+  if(subValue==1){
+      digitalWrite(PUMPPIN,HIGH);
+      delay(200);
+      digitalWrite(PUMPPIN,LOW);
+  }
+  else{
+      digitalWrite(PUMPPIN,LOW);
+  }
 
 }
-else {
-  digitalWrite(PUMPPIN, LOW);
 }
-}
-
 
 // Function to connect and reconnect as necessary to the MQTT server.
 // Should be called in the loop function and it will take care if connecting.
@@ -204,3 +218,16 @@ bool MQTT_ping() {
   }
   return pingStatus;
 }
+void myAutoWater(int moisture, int PUMPPIN){
+ if ((millis()-longTime) >6000){
+  if (moisture>2000){
+    digitalWrite(PUMPPIN, HIGH);
+    delay(500);
+    // if((millis()-moistTime)>500){
+    digitalWrite(PUMPPIN, LOW);
+      // moistTime = millis();
+    } 
+    longTime = millis();
+  }
+
+ }
