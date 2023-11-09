@@ -25,9 +25,11 @@
 String DateTime, TimeOnly;
 // constants and variables for everything
 const int PUMPPIN=D19;
+const int LEDPIN=D7;
 int dustPin=D8;
 int duration;
 int startTime;
+int dustTimer;
 int sampleTime_ms=30000;
 int lowPulseOccupancy=0;
 int plantPin=A1;
@@ -40,8 +42,10 @@ float tempF;
 float inHg;
 float moisture;
 float subValue,pubValue;
+float subValue1;
 float ratio=0;
 float concentration=0; 
+float conc;
 bool status;
 
 // classes
@@ -55,10 +59,12 @@ Adafruit_MQTT_Publish rhFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds
 Adafruit_MQTT_Publish aqFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/air-quality");
 Adafruit_MQTT_Publish dustFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/dust-particulates");
 Adafruit_MQTT_Subscribe buttonFeed = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/buttononoff"); 
+Adafruit_MQTT_Subscribe mailFeed = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/youve-got-mail"); 
 Adafruit_SSD1306 display(OLED_RESET);//OLED display
 Adafruit_BME280 bme;
 //functions
 void myAutoWater(int moisture, int PUMPPIN);
+float getDust(int DUSTPIN);
 
 void MQTT_connect();
 bool MQTT_ping();
@@ -87,6 +93,7 @@ pinMode(plantPin, INPUT);//all the pins
 pinMode(dustPin, INPUT);
 pinMode(PUMPPIN, OUTPUT);
 digitalWrite (PUMPPIN, LOW);
+pinMode(LEDPIN, OUTPUT);
 startTime=millis();
 
 Particle.syncTime();//time
@@ -114,12 +121,12 @@ void loop() {
   DateTime=Time.timeStr();
   moisture=analogRead(plantPin);
   currentQuality=sensor.slope();
-  duration = pulseIn(dustPin, LOW);
-
   tempF=map(tempC,0.0,100.0,32.0,212.0);//BME maps
-  inHg=map(pressPa,3386.0,108364.0,1.0,32.0); 
+  inHg=map(pressPa,3386.39,108000.00,1.0,38.40); 
+
 
 lowPulseOccupancy=lowPulseOccupancy+duration;
+duration = pulseIn(dustPin, LOW);
 
 if((millis()-startTime)>sampleTime_ms){
 
@@ -128,9 +135,15 @@ ratio=lowPulseOccupancy/(sampleTime_ms*10.0);
 concentration=1.1*pow(ratio,3)-3.8*pow(ratio,2)+520*ratio+0.62;
 Serial.printf("%0.2f LPO\n", lowPulseOccupancy);
 Serial.printf("%0.2f ratio\n", ratio);
-Serial.printf("%0.2f concentration\n", concentration);
+Serial.printf("%0.01f concentration\n", concentration);
 startTime=millis();
 
+if(millis()-dustTimer>30000){
+  conc=getDust(dustPin);
+  Serial.printf("Dust conc=%0.2f\n", conc);
+  dustTimer=millis();
+
+}
 
 if((millis()-lastTime > 60000)) {
     if(mqtt.Update()) {
@@ -144,8 +157,8 @@ if((millis()-lastTime > 60000)) {
       Serial.printf("Humidity %0.1 \n",humidRH);
       aqFeed.publish(currentQuality);
       Serial.printf("AQ %i \n",currentQuality);
-      dustFeed.publish(concentration);
-      Serial.printf("DP %0.2f \n",concentration);
+      dustFeed.publish(conc);
+      Serial.printf("DP %0.2f \n",conc);
       }
       lastTime = millis();
       } 
@@ -167,7 +180,8 @@ while ((subscription = mqtt.readSubscription(10000))) {
       subValue = atof((char *)buttonFeed.lastread);
       Serial.printf("Button Subscription %f \n", subValue);
   }
-  if(subValue==1){//adafruit water plant button
+
+if(subValue==1){//adafruit water plant button
       digitalWrite(PUMPPIN,HIGH);
       delay(500);
       digitalWrite(PUMPPIN,LOW);
@@ -175,9 +189,21 @@ while ((subscription = mqtt.readSubscription(10000))) {
   else{
       digitalWrite(PUMPPIN,LOW);
   }
-}
-}
 
+}
+// while ((subscription1 = mqtt.readSubscription(10000))) {
+//    if (subscription1 == &mailFeed) {
+//       subValue1 = atof((char *)mailFeed.lastread);
+//       Serial.printf("Mail Subscription %f \n", subValue1);
+//   }
+//   if(subValue1==1){//adafruit light triggers when i get email
+//       digitalWrite(LEDPIN,HIGH);
+//   }
+//   else{
+//       digitalWrite(LEDPIN,LOW);
+//   }
+// }
+}
 // Function to connect and reconnect as necessary to the MQTT server.
 // Should be called in the loop function and it will take care if connecting.
 void MQTT_connect() {
@@ -217,7 +243,7 @@ bool MQTT_ping() {
 void myAutoWater(int moisture, int PUMPPIN){// water the plant if it is dry, check every half hour function
 static unsigned int longTime;
 
- if ((millis()-longTime) >180000){
+ if ((millis()-longTime) >180000000){
   if (moisture>2000){
     digitalWrite(PUMPPIN, HIGH);
     delay(500);
@@ -227,3 +253,19 @@ static unsigned int longTime;
   }
 
  }
+float getDust(int DUSTPIN){
+  float concentration;
+  int duration;
+  int lowPulseOccupancy;
+  unsigned int startTime;
+
+  lowPulseOccupancy=0;
+  startTime=millis();
+  
+  while(millis()-startTime<30000){
+      duration=pulseIn(DUSTPIN, LOW);
+      lowPulseOccupancy=lowPulseOccupancy+duration;
+  }
+    concentration= 1.1*pow(ratio,3)-3.8*pow(ratio,2)+520*ratio+0.62;
+    return concentration; 
+}
